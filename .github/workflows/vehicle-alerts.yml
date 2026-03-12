@@ -12,4 +12,4 @@ jobs:
     steps:
       - name: Trigger secure cron endpoint
         run: |
-          curl -L "${{ secrets.CRON_URL }}"
+          curl -L "https://tests.cdndirect.workers.dev/cron-check?token=apollo-cron-2026-secure"
