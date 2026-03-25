@@ -361,6 +361,9 @@ function layout(content, active) {
   </div>
 
   <script>
+  window.addEventListener('error', function (e) {
+    alert('JS Error: ' + e.message + ' (line ' + e.lineno + ')');
+  });
   // ✅ GLOBAL FUNCTIONS (fix "not defined" errors)
 
   window.openAddProduct = function () {
@@ -563,14 +566,14 @@ function layout(content, active) {
       autoNumbers();
     });
 
-    // ================= GLOBAL CORE FUNCTIONS =================
+// ================= GLOBAL FIX FUNCTIONS =================
 
     // ---------- INVENTORY ----------
     window.syncSkuAndDuplicate = function () {
       var name = document.getElementById('pName')?.value || '';
-      var skuInput = document.getElementById('pSku');
-      if (!skuInput.value) {
-        skuInput.value = name.substring(0, 4).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+      var sku = document.getElementById('pSku');
+      if (sku && !sku.value) {
+        sku.value = name.substring(0, 4).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
       }
     };
 
@@ -578,43 +581,63 @@ function layout(content, active) {
       var name = document.getElementById('pName').value.trim();
       if (!name) return alert('Product name required');
 
-      var sku = document.getElementById('pSku').value.trim();
-      var data = {
+      const res = await saveItem('product:', {
         name: name,
-        sku: sku,
-        unit: document.getElementById('pUnit').value || 'pcs',
+        sku: document.getElementById('pSku').value,
+        unit: document.getElementById('pUnit').value,
         purchasePrice: +document.getElementById('pBuy').value || 0,
         salePrice: +document.getElementById('pSell').value || 0,
         stock: +document.getElementById('pStock').value || 0
-      };
+      });
 
-      await saveItem('product:', data);
+      if (!res) return;
+
       closeModal('addProduct');
       location.reload();
     };
 
     // ---------- PARTIES ----------
-    window.partyDuplicateHint = function () {};
-
     window.saveParty = async function () {
       var name = document.getElementById('partyName').value.trim();
       if (!name) return alert('Name required');
 
-      await saveItem('party:', {
-        name: name,
+      var type = window.partyTab || 'customer';
+
+      const res = await saveItem('party:', {
+        name,
         phone: document.getElementById('partyPhone').value,
         address: document.getElementById('partyAddr').value,
-        type: 'customer',
+        type,
         balance: 0
       });
+
+      if (!res) return;
 
       closeModal('addParty');
       location.reload();
     };
 
-    // ---------- PAYMENT ----------
-    window.resolvePayParty = function () {};
+    // ---------- SALES ----------
+    window.addSaleItem = function () {
+      if (!window.saleItems) window.saleItems = [];
+      window.saleItems.push({ productName: '', qty: 1, rate: 0, amount: 0 });
 
+      if (typeof renderSaleItems === 'function') renderSaleItems();
+    };
+
+    // ---------- BANK ----------
+    window.saveBank = async function () {
+      var name = document.getElementById('bankName').value.trim();
+      if (!name) return alert('Enter bank name');
+
+      const res = await saveItem('bank:', { name, openingBalance: 0 });
+      if (!res) return;
+
+      closeModal('addBank');
+      location.reload();
+    };
+
+    // ---------- PAYMENT ----------
     window.choosePayMethod = function (method) {
       document.getElementById('payMethod').value = method;
     };
@@ -623,41 +646,51 @@ function layout(content, active) {
       var amount = +document.getElementById('payAmount').value || 0;
       if (amount <= 0) return alert('Enter amount');
 
-      await saveItem('payment:', {
-        amount: amount,
+      const res = await saveItem('payment:', {
+        amount,
         date: todayISO(),
         method: document.getElementById('payMethod').value || 'cash'
       });
+
+      if (!res) return;
 
       closeModal('addPayment');
       location.reload();
     };
 
-    // ---------- BANK ----------
-    window.openBankModal = function () {
-      openModal('addBank');
-    };
-
     // ---------- EXPENSE ----------
-    window.openExpenseModal = function () {
-      openModal('addExpense');
-    };
-
-    window.openExpenseBankModal = function () {
-      openModal('addBank');
-    };
-
-    window.addHead = function () {
+    window.addHead = async function () {
       var name = prompt('Enter expense head');
       if (!name) return;
-      saveItem('expHead:', { name: name });
+
+      await saveItem('expHead:', { name });
+      location.reload();
     };
 
-    window.addSubHead = function () {
-      var name = prompt('Enter sub head');
+    window.addSubHead = async function () {
+      var name = prompt('Enter sub-head');
       if (!name) return;
-      saveItem('expSubHead:', { name: name });
+
+      await saveItem('expSubHead:', { name });
+      location.reload();
     };
+
+    // ---------- AUTO DATE + NUMBER ----------
+    window.addEventListener('DOMContentLoaded', function () {
+      var today = todayISO();
+
+      ['purDate','saleDate','payDate','expDate'].forEach(id => {
+        var el = document.getElementById(id);
+        if (el && !el.value) el.value = today;
+      });
+
+      var map = { purNo:'PUR', saleNo:'INV', payNo:'PAY', expNo:'EXP' };
+
+      Object.keys(map).forEach(id => {
+        var el = document.getElementById(id);
+        if (el && !el.value) el.value = txnNo(map[id]);
+      });
+    });
   </script>
 </body>
 </html>`;
