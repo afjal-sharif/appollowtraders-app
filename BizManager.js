@@ -6,7 +6,7 @@
 
 const PIN = "1234";
 const MASTER_KEY = "4321";
-const LICENSE_EXPIRE = "2026-12-31";
+const LICENSE_EXPIRE = "2028-12-31";
 const USE_KV_LICENSE = true;
 
 export default {
@@ -1462,6 +1462,387 @@ function purchasesPage() {
   });
 
   window.initPurchases();
+  </script>`;
+}
+// ============================================================
+// SALES MODULE (Fixed: Stock Count & Stock-Only Filter)
+// ============================================================
+function salesPage() {
+  return `
+  <div class="page-header">
+    <div>
+      <div class="page-title">Sales</div>
+      <div class="page-sub">Manage invoices and customer credit</div>
+    </div>
+    <button class="btn btn-primary" onclick="window.openSaleModal()">➕ New Sale</button>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="table-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Invoice #</th>
+            <th>Customer</th>
+            <th class="r">Total</th>
+            <th class="r">Paid</th>
+            <th class="r">Due</th>
+            <th class="r">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="saleBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="saleModal">
+    <div class="modal" style="max-width:750px">
+      <h3 id="saleModalTitle">New Sale</h3>
+      <input type="hidden" id="saleEditKey">
+      
+      <div class="form-row">
+        <div>
+          <label>Date</label>
+          <input type="date" id="saleDate">
+        </div>
+        <div>
+          <label>Invoice Number</label>
+          <input id="saleNo" readonly>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Customer</label>
+        <select id="saleCustomer"></select>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px">
+        <span style="font-weight:600;font-size:13px">Items</span>
+        <button class="btn btn-outline btn-sm" onclick="window.addSaleItem()">➕ Add Item</button>
+      </div>
+      
+      <div id="saleItems"></div>
+
+      <div class="form-row" style="margin-top:15px; grid-template-columns: 1fr 1fr 1fr;">
+        <div>
+          <label>Discount</label>
+          <div style="display:flex; gap:4px">
+            <select id="saleDiscountType" style="width:70px" onchange="window.calcSaleTotal()">
+              <option value="percent">%</option>
+              <option value="flat">Flat</option>
+            </select>
+            <input type="number" id="saleDiscount" value="0" oninput="window.calcSaleTotal()">
+          </div>
+        </div>
+        <div>
+          <label>Extra Charges</label>
+          <input type="number" id="saleExtra" value="0" oninput="window.calcSaleTotal()">
+        </div>
+        <div>
+          <label>VAT</label>
+          <div style="display:flex; gap:4px">
+            <select id="saleVatType" style="width:70px" onchange="window.calcSaleTotal()">
+              <option value="percent">%</option>
+              <option value="flat">Flat</option>
+            </select>
+            <input type="number" id="saleVat" value="0" oninput="window.calcSaleTotal()">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top:10px; grid-template-columns: 1fr 1fr 1fr;">
+        <div>
+          <label>AIT</label>
+          <div style="display:flex; gap:4px">
+            <select id="saleAitType" style="width:70px" onchange="window.calcSaleTotal()">
+              <option value="percent">%</option>
+              <option value="flat">Flat</option>
+            </select>
+            <input type="number" id="saleAit" value="0" oninput="window.calcSaleTotal()">
+          </div>
+        </div>
+        <div>
+          <label>Paid Amount</label>
+          <input type="number" id="salePaid" placeholder="0">
+        </div>
+        <div>
+          <label>Payment Method</label>
+          <select id="saleMethod" onchange="window.toggleBankView(this.value)">
+            <option value="cash">💵 Cash</option>
+            <option value="bank">🏦 Bank</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="bankWrap" class="form-group" style="display:none; margin-top:10px">
+        <label>Select Bank Account</label>
+        <select id="saleBank"></select>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#f0f7ff; padding:15px; border-radius:8px; margin-top:20px">
+        <div>
+           <span style="font-size:12px; color:#666">Grand Total</span>
+           <div id="saleTotal" style="font-size:24px; font-weight:bold; color:#1e40af">0</div>
+        </div>
+        <div style="display:flex; gap:8px">
+          <button class="btn btn-outline" onclick="closeModal('saleModal')">Cancel</button>
+          <button class="btn btn-primary" onclick="window.saveSale()">Save Invoice</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="saleView">
+    <div class="modal" style="max-width:800px">
+      <div id="saleInvoice"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:15px">
+        <button class="btn btn-outline" onclick="closeModal('saleView')">Close</button>
+        <button class="btn btn-primary" onclick="window.printSale()">🖨 Print</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  var saleItems = [];
+  var products = [];
+  var customers = [];
+  var sales = [];
+  var banks = [];
+
+  window.initSales = async function() {
+    let d = await Promise.all([loadList('sale:'), loadList('product:'), loadList('party:'), loadList('bank:')]);
+    sales = d[0] || [];
+    products = d[1] || [];
+    customers = (d[2] || []).filter(x => x.type === 'customer');
+    banks = d[3] || [];
+
+    document.getElementById('saleCustomer').innerHTML = '<option value="">Select Customer</option>' +
+      customers.map(c => '<option value="'+c._key+'">'+c.name+'</option>').join('');
+    document.getElementById('saleBank').innerHTML = banks.map(b => '<option value="'+b._key+'">'+b.name+'</option>').join('');
+
+    renderSalesTable();
+  };
+
+  function renderSalesTable() {
+    var sorted = sales.slice().sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    document.getElementById('saleBody').innerHTML = sorted.map(s => \`
+      <tr>
+        <td>\${s.date}</td>
+        <td><span class="clickable" onclick="window.viewSale('\${s._key}')">\${s.invoiceNo}</span></td>
+        <td>\${s.customerName}</td>
+        <td class="r">\${fmt(s.total)}</td>
+        <td class="r">\${fmt(s.paid)}</td>
+        <td class="r bold" style="color:\${(s.total-s.paid)>0?'#b91c1c':'#15803d'}">\${fmt(s.total - s.paid)}</td>
+        <td class="r">
+          <button class="btn btn-outline btn-sm" onclick="window.editSale('\${s._key}')">✏️</button>
+        </td>
+      </tr>\`).join('');
+  }
+
+  window.openSaleModal = function() {
+    document.getElementById('saleEditKey').value = '';
+    document.getElementById('saleModalTitle').innerText = "New Sale";
+    document.getElementById('saleDate').value = todayISO();
+    document.getElementById('saleNo').value = txnNo('SAL');
+    document.getElementById('salePaid').value = '';
+    document.getElementById('saleDiscount').value = 0;
+    document.getElementById('saleExtra').value = 0;
+    document.getElementById('saleVat').value = 0;
+    document.getElementById('saleAit').value = 0;
+    saleItems = [];
+    window.addSaleItem();
+    openModal('saleModal');
+  };
+
+  window.addSaleItem = function() {
+    saleItems.push({productKey:'', productName:'', qty:1, rate:0, amount:0});
+    window.renderItems();
+  };
+
+  window.removeSaleItem = function(idx) {
+    saleItems.splice(idx, 1);
+    if(saleItems.length === 0) window.addSaleItem();
+    else window.renderItems();
+  };
+
+  // ✅ FIXED: Now filters for stock > 0 AND shows the count beside the name
+  window.renderItems = function() {
+    var html = saleItems.map((it, i) => \`
+      <div class="form-row" style="grid-template-columns:1fr 70px 100px 100px 36px; align-items:end; margin-bottom:8px">
+        <select onchange="window.updateSaleRow(\${i}, 'productKey', this.value)">
+          <option value="">Select Product</option>
+          \${products
+            .filter(p => p.stock > 0 || p._key === it.productKey)
+            .map(p => '<option value="'+p._key+'" '+(it.productKey==p._key?'selected':'')+'>'+p.name+' (Stock: '+(p.stock||0)+')</option>')
+            .join('')}
+        </select>
+        <input type="number" value="\${it.qty}" oninput="window.updateSaleRow(\${i}, 'qty', this.value)">
+        <input type="number" value="\${it.rate}" oninput="window.updateSaleRow(\${i}, 'rate', this.value)">
+        <div id="saleItemAmt_\${i}" style="text-align:right; font-weight:600; padding:10px 0">\${fmt(it.amount)}</div>
+        <button class="btn btn-danger btn-sm" onclick="window.removeSaleItem(\${i})">✕</button>
+      </div>\`).join('');
+    document.getElementById('saleItems').innerHTML = html;
+    window.calcSaleTotal();
+  };
+
+  window.updateSaleRow = function(idx, field, val) {
+    if (field === 'productKey') {
+      let p = products.find(x => x._key === val);
+      if (p) {
+        saleItems[idx].productKey = val;
+        saleItems[idx].productName = p.name;
+        saleItems[idx].rate = p.salePrice || 0;
+      }
+      window.renderItems(); 
+      return;
+    }
+    saleItems[idx][field] = Number(val);
+    saleItems[idx].amount = saleItems[idx].qty * saleItems[idx].rate;
+    if(document.getElementById('saleItemAmt_'+idx)) document.getElementById('saleItemAmt_'+idx).textContent = fmt(saleItems[idx].amount);
+    window.calcSaleTotal();
+  };
+
+  window.calcSaleTotal = function() {
+    let sub = saleItems.reduce((s,i) => s + (i.amount || 0), 0);
+    let dVal = Number(document.getElementById('saleDiscount').value || 0);
+    let dType = document.getElementById('saleDiscountType').value;
+    let discAmt = (dType === 'percent') ? (sub * dVal / 100) : dVal;
+    let extra = Number(document.getElementById('saleExtra').value || 0);
+    let base = sub - discAmt + extra;
+    let vVal = Number(document.getElementById('saleVat').value || 0);
+    let vType = document.getElementById('saleVatType').value;
+    let vatAmt = (vType === 'percent') ? (base * vVal / 100) : vVal;
+    let aVal = Number(document.getElementById('saleAit').value || 0);
+    let aType = document.getElementById('saleAitType').value;
+    let aitAmt = (aType === 'percent') ? (base * aVal / 100) : aVal;
+    let total = base + vatAmt + aitAmt;
+    document.getElementById('saleTotal').innerText = fmt(total);
+    return total;
+  };
+
+  window.toggleBankView = function(val) {
+    document.getElementById('bankWrap').style.display = (val === 'bank') ? 'block' : 'none';
+  };
+
+  window.editSale = function(key) {
+    let s = sales.find(x => x._key === key);
+    if (!s) return;
+    document.getElementById('saleEditKey').value = s._key;
+    document.getElementById('saleModalTitle').innerText = "Edit Sale";
+    document.getElementById('saleDate').value = s.date;
+    document.getElementById('saleNo').value = s.invoiceNo;
+    document.getElementById('saleCustomer').value = s.customerId;
+    document.getElementById('salePaid').value = s.paid;
+    document.getElementById('saleDiscount').value = s.discount || 0;
+    document.getElementById('saleDiscountType').value = s.discountType || 'percent';
+    document.getElementById('saleExtra').value = s.extra || 0;
+    document.getElementById('saleVat').value = s.vat || 0;
+    document.getElementById('saleVatType').value = s.vatType || 'percent';
+    document.getElementById('saleAit').value = s.ait || 0;
+    document.getElementById('saleAitType').value = s.aitType || 'percent';
+    document.getElementById('saleMethod').value = s.method || 'cash';
+    window.toggleBankView(s.method);
+    if(s.bankKey) document.getElementById('saleBank').value = s.bankKey;
+    saleItems = JSON.parse(JSON.stringify(s.items));
+    window.renderItems();
+    openModal('saleModal');
+  };
+
+  window.viewSale = function(key) {
+    let s = sales.find(x => x._key === key);
+    if (!s) return;
+    let sub = s.items.reduce((sum, i) => sum + (i.amount || 0), 0);
+    let discAmt = (s.discountType === 'percent') ? (sub * (s.discount||0) / 100) : (s.discount||0);
+    let baseForTax = sub - discAmt + (s.extra || 0);
+    let vatAmt = (s.vatType === 'percent') ? (baseForTax * (s.vat||0) / 100) : (s.vat||0);
+    let aitAmt = (s.aitType === 'percent') ? (baseForTax * (s.ait||0) / 100) : (s.ait||0);
+
+    let rows = s.items.map((it, i) => \`<tr><td>\${i+1}</td><td>\${it.productName}</td><td class="r">\${it.qty}</td><td class="r">\${fmt(it.rate)}</td><td class="r">\${fmt(it.amount)}</td></tr>\`).join('');
+
+    document.getElementById('saleInvoice').innerHTML = \`
+      <div id="printArea">
+        <div style="display:flex;justify-content:space-between;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:15px">
+          <div><h2 style="margin:0">INVOICE</h2><b>No:</b> \${s.invoiceNo}</div>
+          <div style="text-align:right"><b>Date:</b> \${s.date}<br><b>Customer:</b> \${s.customerName}</div>
+        </div>
+        <table class="tbl" style="width:100%; border-collapse:collapse">
+          <thead><tr style="background:#f4f4f4"><th>#</th><th>Product</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>
+          <tbody>\${rows}</tbody>
+        </table>
+        <div style="display:flex;justify-content:flex-end;margin-top:20px">
+          <div style="width:300px; line-height:1.8">
+            <div style="display:flex;justify-content:space-between"><span>Subtotal:</span><span>\${fmt(sub)}</span></div>
+            <div style="display:flex;justify-content:space-between; color:red"><span>Discount:</span><span>-\${fmt(discAmt)}</span></div>
+            <div style="display:flex;justify-content:space-between; border-top:1px solid #eee"><span>VAT:</span><span>+\${fmt(vatAmt)}</span></div>
+            <div style="display:flex;justify-content:space-between"><span>AIT:</span><span>+\${fmt(aitAmt)}</span></div>
+            <div style="display:flex;justify-content:space-between; font-weight:bold; font-size:1.2em; border-top:2px solid #333; margin-top:5px"><span>Grand Total:</span><span>\${fmt(s.total)}</span></div>
+            <div style="display:flex;justify-content:space-between; color:green"><span>Paid:</span><span>\${fmt(s.paid)}</span></div>
+            <div style="display:flex;justify-content:space-between; border-top:1px dashed #666"><span>Balance Due:</span><span>\${fmt(s.total - s.paid)}</span></div>
+          </div>
+        </div>
+      </div>\`;
+    openModal('saleView');
+  };
+
+  window.saveSale = async function() {
+    let editKey = document.getElementById('saleEditKey').value;
+    let custKey = document.getElementById('saleCustomer').value;
+    let cust = customers.find(x => x._key === custKey);
+    if (!cust) return alert('Select customer');
+    
+    let total = window.calcSaleTotal();
+    let paid = Number(document.getElementById('salePaid').value || 0);
+
+    if (editKey) {
+      let old = sales.find(x => x._key === editKey);
+      if (old) {
+        for (let it of old.items) {
+          let p = products.find(x => x._key === it.productKey);
+          if (p) { p.stock = (Number(p.stock)||0) + Number(it.qty); await saveByKey(p._key, cleanForSave(p)); }
+        }
+        cust.balance = (Number(cust.balance)||0) - (Number(old.total) - Number(old.paid));
+      }
+    }
+    
+    let payload = {
+      date: document.getElementById('saleDate').value,
+      invoiceNo: document.getElementById('saleNo').value,
+      customerId: cust._key, customerName: cust.name,
+      items: saleItems.filter(i => i.productKey),
+      discount: Number(document.getElementById('saleDiscount').value),
+      discountType: document.getElementById('saleDiscountType').value,
+      extra: Number(document.getElementById('saleExtra').value),
+      vat: Number(document.getElementById('saleVat').value),
+      vatType: document.getElementById('saleVatType').value,
+      ait: Number(document.getElementById('saleAit').value),
+      aitType: document.getElementById('saleAitType').value,
+      total: total, paid: paid, method: document.getElementById('saleMethod').value,
+      bankKey: document.getElementById('saleBank').value
+    };
+
+    let res = editKey ? await saveByKey(editKey, payload) : await saveItem('sale:', payload);
+    if (res) {
+      for (let it of payload.items) {
+        let p = products.find(x => x._key === it.productKey);
+        if (p) { p.stock = (Number(p.stock)||0) - Number(it.qty); await saveByKey(p._key, cleanForSave(p)); }
+      }
+      cust.balance = (Number(cust.balance)||0) + (total - paid);
+      await saveByKey(cust._key, cleanForSave(cust));
+      closeModal('saleModal'); 
+      window.initSales(); 
+    }
+  };
+
+  window.printSale = function() {
+    let content = document.getElementById('printArea').innerHTML;
+    let win = window.open('', '_blank');
+    win.document.write('<html><head><title>Invoice</title><style>body{font-family:sans-serif;padding:30px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px}.r{text-align:right}</style></head><body>'+content+'</body></html>');
+    win.document.close();
+    setTimeout(() => { win.print(); win.close(); }, 500);
+  };
+
+  window.initSales();
   </script>`;
 }
 // ============================================================
